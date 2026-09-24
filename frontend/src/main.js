@@ -179,11 +179,23 @@ form.addEventListener('submit', async (e) => {
 
 appealBtn.addEventListener('click', async () => {
   if (!client || !lastRequestId) return;
+  const word = Math.random().toString(36).slice(2, 7);
+  const t0 = performance.now();
+  const typed = window.prompt('Type this word to confirm you are human: ' + word);
+  if (typed === null || typed.trim().toLowerCase() !== word) {
+    verdictText.textContent = 'challenge failed, appeal cancelled';
+    return;
+  }
   appealBtn.disabled = true;
   verdictText.textContent = 'appeal submitted, re-evaluating with additional context…';
 
   try {
-    const appealEvidence = JSON.stringify({ note: "solved manual challenge, human confirmed via secondary check" });
+    const appealEvidence = JSON.stringify({
+      challenge_word: word,
+      challenge_passed: true,
+      solve_ms: Math.round(performance.now() - t0),
+      fresh_signals: collector.build()
+    });
     await appealVerification(client, lastRequestId, appealEvidence);
     await resolveAppeal(client, lastRequestId);
     const req = await getRequest(client, lastRequestId);

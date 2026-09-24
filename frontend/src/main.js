@@ -5,7 +5,6 @@ import {
   submitVerification,
   resolveVerification,
   appealVerification,
-  registerSite,
   resolveAppeal,
   getRequest,
   onAccountsChanged,

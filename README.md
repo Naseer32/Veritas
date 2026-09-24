@@ -17,10 +17,13 @@ consensus, with an on-chain appeal path for flagged users.
 
 ## Status
 
-- [ ] Contract deployed and smoke-tested on GenLayer Studio
+- [x] Contract deployed and smoke-tested on GenLayer Studio Next
+      (`0x78cD3fcB07DBbb14549f1e7Cb5D0eA00b577c0a9`) — register_site,
+      submit_verification, resolve_verification (human + bot cases),
+      appeal_verification, and resolve_appeal all confirmed working
+      end-to-end via the Studio interact panel.
 - [ ] Widget integrated with a demo site
-- [ ] Demo frontend
-- [ ] Demo video
+- [x] Demo frontend (simulation mode)
 - [ ] Submitted to the GenLayer portal
 
 ## Setup
@@ -31,6 +34,5 @@ node test/test-veritas.js
 ```
 
 Set `GL_RPC_URL` and `GL_CHAIN_ID` env vars to point at the network you're
-testing against (see hackathon/portal submission requirements for the
+testing against (defaults to Studio Dev —
 current RPC endpoint).
-

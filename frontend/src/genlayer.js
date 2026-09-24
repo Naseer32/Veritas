@@ -2,23 +2,24 @@ import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 
-// Deployed on GenLayer Studio Next (studio-next.genlayer.com), chain id 61997.
+// Deployed on GenLayer Studio (studio.genlayer.com), chain id 61999.
 // Built from the SDK's `studionet` object with the id/name/RPC overridden,
 // so anything else studionet exposes (nativeCurrency, etc.) still comes
-// through unchanged. (Same pattern as the Arbiter frontend.)
+// through unchanged. (Same pattern as the Arbiter frontend, adjusted from
+// Studio's own 61999.)
 const studioChain = {
   ...studionet,
-  id: 61997,
-  name: "GenLayer Studio Next",
+  id: 61999,
+  name: "GenLayer Studio",
   rpcUrls: {
-    default: { http: ["https://studio-next.genlayer.com/api"] },
+    default: { http: ["https://studio.genlayer.com/api"] },
   },
 };
 
 export const CONTRACT_ADDRESS = "0xB42e0D84a87576EbF803BBD455dBB56DB37e3E43";
 export const SITE_ID = "test-site";
 
-// Make sure the wallet is actively on GenLayer Studio Next before signing --
+// Make sure the wallet is actively on GenLayer Studio before signing --
 // genlayer-js's client requires the wallet's current chain to match, or
 // write calls fail with "chainId should be same as current chainId".
 function toHexChainId(id) {
@@ -36,7 +37,7 @@ export async function ensureStudioNetwork() {
     params: [
       {
         chainId: toHexChainId(studioChain.id),
-        chainName: studioChain.name ?? "GenLayer Studio Next",
+        chainName: studioChain.name ?? "GenLayer Studio",
         nativeCurrency: studioChain.nativeCurrency ?? {
           name: "GEN",
           symbol: "GEN",
@@ -56,7 +57,7 @@ export async function connectWallet() {
   return account;
 }
 
-export const REQUIRED_NETWORK_NAME = studioChain.name ?? "GenLayer Studio Next";
+export const REQUIRED_NETWORK_NAME = studioChain.name ?? "GenLayer Studio";
 export const REQUIRED_CHAIN_ID_HEX = toHexChainId(studioChain.id);
 
 export async function getCurrentChainIdHex() {

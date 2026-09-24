@@ -25,6 +25,15 @@ class EvidenceCollector {
     window.addEventListener('pointermove', e=>{
       if(this.pointerEvents.length<200) this.pointerEvents.push({x:e.clientX,y:e.clientY});
     }, {passive:true});
+    this.touchCount=0; this.tapCount=0; this.scrollCount=0; this.inputCount=0;
+    window.addEventListener('touchmove', e=>{
+      const t=e.touches[0]; if(!t) return;
+      this.touchCount++;
+      if(this.pointerEvents.length<200) this.pointerEvents.push({x:t.clientX,y:t.clientY});
+    }, {passive:true});
+    window.addEventListener('pointerdown', ()=>{ this.tapCount++; }, {passive:true});
+    window.addEventListener('scroll', ()=>{ this.scrollCount++; }, {passive:true});
+    document.addEventListener('input', ()=>{ this.inputCount++; });
   }
   entropy(){
     if(this.pointerEvents.length<3) return 0;
@@ -41,6 +50,10 @@ class EvidenceCollector {
       elapsed_ms: Math.round(performance.now()-this.startTime),
       pointer_sample_count: this.pointerEvents.length,
       pointer_entropy: this.entropy(),
+      touch_sample_count: this.touchCount,
+      tap_count: this.tapCount,
+      scroll_count: this.scrollCount,
+      input_events: this.inputCount,
       honeypot_triggered: this.honeypotTriggered,
       navigator: {
         languages: navigator.languages,

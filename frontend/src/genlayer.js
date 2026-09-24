@@ -31,12 +31,13 @@ export async function ensureStudioNetwork() {
   const rpcUrl =
     studioChain.rpcUrls?.default?.http?.[0] ?? studioChain.rpcUrls?.[0];
   const explorerUrl = studioChain.blockExplorers?.default?.url;
+  const hexId = toHexChainId(studioChain.id);
 
   await window.ethereum.request({
     method: "wallet_addEthereumChain",
     params: [
       {
-        chainId: toHexChainId(studioChain.id),
+        chainId: hexId,
         chainName: studioChain.name ?? "GenLayer Studio",
         nativeCurrency: studioChain.nativeCurrency ?? {
           name: "GEN",
@@ -48,6 +49,19 @@ export async function ensureStudioNetwork() {
       },
     ],
   });
+
+  // wallet_addEthereumChain doesn't always switch the active network on its
+  // own (e.g. if the chain was already added previously) -- force it, then
+  // verify, so we never silently proceed on the wrong chain.
+  await window.ethereum.request({
+    method: "wallet_switchEthereumChain",
+    params: [{ chainId: hexId }],
+  });
+
+  const current = await window.ethereum.request({ method: "eth_chainId" });
+  if (current.toLowerCase() !== hexId.toLowerCase()) {
+    throw new Error(`Wallet is still on chain ${current}, not ${hexId} (${studioChain.name}). Please switch manually.`);
+  }
 }
 
 export async function connectWallet() {

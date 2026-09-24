@@ -152,7 +152,21 @@ form.addEventListener('submit', async (e) => {
     const config = site.config ? JSON.parse(site.config) : {};
     const feeWei = BigInt(config.fee_wei || 0);
 
+    if (!window.__turnstileToken) throw new Error('Complete the Turnstile check first');
+    let turnstile = { passed: false };
+    try {
+      const tr = await fetch('/api/turnstile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: window.__turnstileToken })
+      });
+      const td = await tr.json();
+      turnstile = { passed: td.success === true, hostname: td.hostname || null };
+    } catch {}
+    window.__turnstileToken = null;
+    try { if (window.turnstile) window.turnstile.reset(); } catch {}
     const evidence = collector.build();
+    evidence.turnstile = turnstile;
     evidenceOut.textContent = JSON.stringify(evidence, null, 2);
 
     const { tx, requestId } = await submitVerification(client, SITE_ID, JSON.stringify(evidence), feeWei);

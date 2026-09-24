@@ -17,16 +17,17 @@ consensus, with an on-chain appeal path for flagged users.
 
 ## Status
 
-- [x] Contract deployed and smoke-tested on GenLayer Studio Next
+- [x] Contract deployed and smoke-tested on GenLayer Studio
       (`0x78cD3fcB07DBbb14549f1e7Cb5D0eA00b577c0a9`) — register_site,
       submit_verification, resolve_verification (human + bot cases),
       appeal_verification, and resolve_appeal all confirmed working
       end-to-end via the Studio interact panel.
+- [ ] Redeploy to GenLayer Studio Next for the hackathon submission
 - [ ] Widget integrated with a demo site
 - [x] Demo frontend (simulation mode)
 - [ ] Submitted to the GenLayer portal
 
-## Test Results (Studio Next)
+## Test Results (GenLayer Studio)
 
 All flows confirmed working end-to-end via the Studio interact panel:
 

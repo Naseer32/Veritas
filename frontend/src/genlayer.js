@@ -117,7 +117,8 @@ async function writeContractWithFees(client, { address, functionName, args, valu
     });
     console.log("FEE ESTIMATE:", JSON.stringify(estimate, (k,v)=>typeof v==='bigint'?v.toString():v));
   } catch (e) {
-    throw new Error(`[FEE ESTIMATE FAILED] ${e.message}`);
+    console.warn("fee estimate unavailable, writing without fees:", e.message);
+    estimate = null;
   }
 
   let tx;
@@ -127,11 +128,11 @@ async function writeContractWithFees(client, { address, functionName, args, valu
       functionName,
       args,
       value: safeValue,
-      fees: {
+      ...(estimate ? { fees: {
         distribution: estimate.distribution,
         feeValue: estimate.feeValue,
         messageAllocations: estimate.messageAllocations,
-      },
+      } } : {}),
     });
   } catch (e) {
     throw new Error(`[WRITE FAILED] ${e.message}`);

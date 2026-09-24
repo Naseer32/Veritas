@@ -13,6 +13,6 @@ export default async function handler(req, res) {
     const d = await r.json();
     return res.status(200).json({ success: d.success === true, hostname: d.hostname || null, challenge_ts: d.challenge_ts || null });
   } catch (e) {
-    return res.status(502).json({ success: false, error: "verify failed" });
+    return res.status(502).json({ success: false, error: "verify failed: " + (e && e.message) });
   }
 }

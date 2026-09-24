@@ -162,6 +162,7 @@ form.addEventListener('submit', async (e) => {
       });
       const td = await tr.json();
       turnstile = { passed: td.success === true, hostname: td.hostname || null };
+      window.__lastTd = td;
       if (td.nonce && td.signature) { window.__attestNonce = td.nonce; window.__attestSig = td.signature; }
     } catch {}
     window.__turnstileToken = null;
@@ -171,7 +172,7 @@ form.addEventListener('submit', async (e) => {
     evidence.turnstile = turnstile;
     evidenceOut.textContent = JSON.stringify(evidence, null, 2);
 
-        if (!window.__attestNonce || !window.__attestSig) throw new Error('Missing attestation - retry Turnstile');
+        if (!window.__attestNonce || !window.__attestSig) throw new Error('Missing attestation ' + JSON.stringify(window.__lastTd || null));
     const { tx, requestId } = await submitVerification(client, SITE_ID, JSON.stringify(evidence), feeWei, window.__attestNonce, window.__attestSig);
     window.__attestNonce = null; window.__attestSig = null;
     lastRequestId = requestId;

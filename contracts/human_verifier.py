@@ -1,6 +1,54 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import json
+import hashlib
+
+_P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
+_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+_G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798, 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)
+_PUB = (0x29366a32d7ce36862f962bf559a0328ea82b880f877d5cca6ea5cbdc39957da2, 0x8606ac00eda2517f8d584cccd5f9b5caa991f59171d5da8a183119a4524c14df)
+
+
+def _ec_add(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if a[0] == b[0] and (a[1] + b[1]) % _P == 0:
+        return None
+    if a == b:
+        m = (3 * a[0] * a[0]) * pow(2 * a[1], -1, _P) % _P
+    else:
+        m = (b[1] - a[1]) * pow(b[0] - a[0], -1, _P) % _P
+    x = (m * m - a[0] - b[0]) % _P
+    return (x, (m * (a[0] - x) - a[1]) % _P)
+
+
+def _ec_mul(k, pt):
+    r = None
+    while k:
+        if k & 1:
+            r = _ec_add(r, pt)
+        pt = _ec_add(pt, pt)
+        k >>= 1
+    return r
+
+
+def _verify_attestation(msg, sig_hex):
+    try:
+        if len(sig_hex) != 128:
+            return False
+        r = int(sig_hex[:64], 16)
+        s = int(sig_hex[64:], 16)
+        if not (1 <= r < _N and 1 <= s < _N):
+            return False
+        z = int.from_bytes(hashlib.sha256(msg).digest(), "big")
+        w = pow(s, -1, _N)
+        pt = _ec_add(_ec_mul(z * w % _N, _G), _ec_mul(r * w % _N, _PUB))
+        return pt is not None and pt[0] % _N == r
+    except Exception:
+        return False
+
 
 STATUS_PENDING = "pending"
 STATUS_HUMAN = "human"
@@ -19,6 +67,7 @@ class HumanVerifier(gl.Contract):
     platform_balance_wei: str
     sites: str       # JSON: {site_id: {"owner":.., "config":.., "balance_wei":..}}
     requests: str     # JSON: {request_id: {...}}
+    used_nonces: str
 
     def __init__(self):
         self.site_count = u256(0)
@@ -28,6 +77,7 @@ class HumanVerifier(gl.Contract):
         self.platform_balance_wei = "0"
         self.sites = "{}"
         self.requests = "{}"
+        self.used_nonces = "{}"
 
     # ---------- Site owner: register a site ----------
     # config_json may include "fee_wei": "<amount>" — the price a visitor
@@ -49,11 +99,20 @@ class HumanVerifier(gl.Contract):
     # ---------- Visitor: submit evidence for verification (pays own gas +
     # the site's verification fee, straight from their own wallet) ----------
     @gl.public.write.payable
-    def submit_verification(self, site_id: str, evidence_json: str) -> str:
+    def submit_verification(self, site_id: str, evidence_json: str, nonce: str, signature: str) -> str:
         sites = json.loads(self.sites)
         site = sites.get(site_id)
         if site is None:
             raise Exception("Site does not exist")
+
+        used = json.loads(self.used_nonces)
+        if nonce in used:
+            raise Exception("Attestation already used")
+        att_msg = ("veritas-v1|" + gl.message.sender_address.as_hex.lower() + "|" + nonce).encode()
+        if not _verify_attestation(att_msg, signature):
+            raise Exception("Invalid attestation")
+        used[nonce] = 1
+        self.used_nonces = json.dumps(used, sort_keys=True)
 
         config = json.loads(site["config"]) if site["config"] else {}
         required_fee = int(config.get("fee_wei", 0))

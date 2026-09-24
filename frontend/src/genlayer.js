@@ -146,6 +146,8 @@ async function writeContractWithFees(client, { address, functionName, args, valu
     receipt = await client.waitForTransactionReceipt({
       hash: tx,
       status: TransactionStatus.ACCEPTED,
+      interval: 3000,
+      retries: 200,
     });
   } catch (e) {
     throw new Error(`[CONFIRMATION FAILED] ${functionName} tx ${tx} did not confirm: ${e.message}`);

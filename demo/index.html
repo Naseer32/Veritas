@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veritas — Verification Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14161c; --surface:#1c1f28; --surface-2:#22262f;
+    --ink:#e8e6de; --ink-dim:#9a9a94;
+    --gold:#c9a227; --sage:#7c9d7f; --clay:#b5533c;
+    --serif:'Source Serif 4', Georgia, serif;
+    --mono:'IBM Plex Mono', 'Courier New', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--serif); min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    padding:48px 20px;
+  }
+  .kiosk{ width:100%; max-width:520px; }
+
+  .seal{
+    width:56px; height:56px; border-radius:50%;
+    border:1.5px solid var(--gold); color:var(--gold);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:11px; letter-spacing:0.5px;
+    margin:0 auto 20px; text-align:center; line-height:1.2;
+  }
+  h1{
+    font-size:34px; font-weight:600; text-align:center; margin:0 0 6px;
+  }
+  .sub{
+    text-align:center; color:var(--ink-dim); font-size:15px;
+    margin:0 0 36px; font-family:var(--mono);
+  }
+
+  .card{
+    background:var(--surface); border:1px solid #2a2e38;
+    border-radius:6px; padding:28px;
+  }
+  label{ display:block; font-size:13px; color:var(--ink-dim); margin-bottom:6px; }
+  input[type=text], input[type=email]{
+    width:100%; padding:10px 12px; margin-bottom:16px;
+    background:var(--surface-2); border:1px solid #2f333e; border-radius:4px;
+    color:var(--ink); font-family:var(--serif); font-size:15px;
+  }
+  input:focus{ outline:2px solid var(--gold); outline-offset:1px; }
+
+  button{
+    width:100%; padding:12px; border:none; border-radius:4px;
+    background:var(--gold); color:#1a1a16; font-family:var(--serif);
+    font-size:15px; font-weight:600; cursor:pointer;
+  }
+  button:disabled{ opacity:0.5; cursor:default; }
+  button.ghost{
+    background:transparent; border:1px solid #3a3f4a; color:var(--ink);
+    margin-top:10px;
+  }
+
+  .status{
+    margin-top:22px; padding-top:20px; border-top:1px dashed #2f333e;
+    display:none;
+  }
+  .status.show{ display:block; }
+  .verdict{
+    display:flex; align-items:center; gap:10px; font-family:var(--mono);
+    font-size:14px; margin-bottom:10px;
+  }
+  .dot{ width:9px; height:9px; border-radius:50%; background:var(--ink-dim); }
+  .dot.pending{ background:var(--gold); animation:pulse 1.1s infinite; }
+  .dot.human{ background:var(--sage); }
+  .dot.bot{ background:var(--clay); }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  .stamp{ font-size:20px; font-weight:600; }
+  .stamp.human{ color:var(--sage); }
+  .stamp.bot{ color:var(--clay); }
+
+  details{ margin-top:14px; }
+  summary{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); cursor:pointer; }
+  pre{
+    font-family:var(--mono); font-size:11.5px; color:var(--ink-dim);
+    background:var(--surface-2); padding:12px; border-radius:4px;
+    overflow-x:auto; margin-top:10px; white-space:pre-wrap; word-break:break-word;
+  }
+  .note{
+    text-align:center; font-family:var(--mono); font-size:11px;
+    color:var(--ink-dim); margin-top:20px; line-height:1.6;
+  }
+</style>
+</head>
+<body>
+<div class="kiosk">
+  <div class="seal">VERI<br>TAS</div>
+  <h1>Prove you're human</h1>
+  <p class="sub">on-chain verification, judged by GenLayer validators</p>
+
+  <div class="card">
+    <form id="gate-form">
+      <label for="name">Name</label>
+      <input type="text" id="name" placeholder="Jane Doe" required>
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="jane@example.com" required>
+      <button type="submit" id="verify-btn">Verify me</button>
+    </form>
+
+    <div class="status" id="status">
+      <div class="verdict">
+        <span class="dot" id="dot"></span>
+        <span id="verdict-text">—</span>
+      </div>
+      <div class="stamp" id="stamp"></div>
+      <button class="ghost" id="appeal-btn" style="display:none;">Appeal this decision</button>
+      <details>
+        <summary>Evidence submitted</summary>
+        <pre id="evidence-out"></pre>
+      </details>
+    </div>
+  </div>
+
+  <p class="note">
+    Simulation mode — verdicts computed locally from the same signals<br>
+    the contract's real LLM validators use. The actual contract is<br>
+    already deployed and tested live on Studio Next (0x78cD…c0a9).
+  </p>
+</div>
+
+<script>
+// ---- Evidence collector (mirrors widget/verifier-widget.js) --------------
+class EvidenceCollector {
+  constructor(){
+    this.startTime = performance.now();
+    this.pointerEvents = [];
+    this.honeypotTriggered = false;
+    window.addEventListener('pointermove', e=>{
+      if(this.pointerEvents.length<200) this.pointerEvents.push({x:e.clientX,y:e.clientY});
+    }, {passive:true});
+  }
+  entropy(){
+    if(this.pointerEvents.length<3) return 0;
+    let changes=0;
+    for(let i=2;i<this.pointerEvents.length;i++){
+      const a=this.pointerEvents[i-2], b=this.pointerEvents[i-1], c=this.pointerEvents[i];
+      const v1=Math.atan2(b.y-a.y,b.x-a.x), v2=Math.atan2(c.y-b.y,c.x-b.x);
+      if(Math.abs(v1-v2)>0.15) changes++;
+    }
+    return +(changes/this.pointerEvents.length).toFixed(3);
+  }
+  build(){
+    return {
+      elapsed_ms: Math.round(performance.now()-this.startTime),
+      pointer_sample_count: this.pointerEvents.length,
+      pointer_entropy: this.entropy(),
+      honeypot_triggered: this.honeypotTriggered,
+      navigator: {
+        languages: navigator.languages,
+        hardware_concurrency: navigator.hardwareConcurrency,
+        webdriver: navigator.webdriver === true
+      },
+      timezone_offset_minutes: new Date().getTimezoneOffset()
+    };
+  }
+}
+const collector = new EvidenceCollector();
+
+// ---- Live contract integration ---------------------------------------------
+// SIMULATION = false calls the deployed Veritas contract on Studio Next.
+// If the browser import below fails (e.g. genlayer-js needs a bundler
+// rather than a raw browser import), this falls back to local simulation
+// automatically and logs why — check the console before recording.
+const SIMULATION = true;
+const CONTRACT_ADDRESS = "0x78cD3fcB07DBbb14549f1e7Cb5D0eA00b577c0a9";
+const RPC_URL = "https://studio-next.genlayer.com/api";
+const CHAIN_ID = 61997;
+const SITE_ID = "test-site"; // already registered on this contract
+
+let glClientPromise = null;
+async function getClient(){
+  if (glClientPromise) return glClientPromise;
+  glClientPromise = (async () => {
+    // ESM build via jsdelivr. genlayer-js is primarily built for a
+    // Node/bundler environment (like your Arbiter frontend on Vercel) —
+    // this raw browser import may not work depending on the package's
+    // exports map. If it throws, judge() below falls back to simulation.
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/genlayer-js@2.0.0-rc.1/+esm");
+    const client = createClient({ endpoint: RPC_URL, chainId: CHAIN_ID });
+
+    // TODO: wallet/account setup. Writing to the contract (submit_verification,
+    // resolve_verification) needs a signer. Wire in whatever account/signing
+    // method you used for the Arbiter frontend (frontend/src/genlayer.js) —
+    // e.g. client.connect() with a browser wallet, or an injected account.
+    // Without this, write calls below will fail or need to be adapted to
+    // however your client expects a signer to be attached.
+
+    return client;
+  })();
+  return glClientPromise;
+}
+
+async function writeAndWait(client, functionName, args){
+  const fees = await client.estimateTransactionFeesForWrite({
+    address: CONTRACT_ADDRESS, functionName, args
+  });
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESS, functionName, args,
+    fees: {
+      distribution: fees.distribution,
+      feeValue: fees.feeValue,
+      messageAllocations: fees.messageAllocations,
+    },
+  });
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  return receipt.result;
+}
+
+async function judge(evidence){
+  if (!SIMULATION) {
+    try {
+      const client = await getClient();
+      const evidenceJson = JSON.stringify(evidence);
+
+      const requestId = await writeAndWait(client, "submit_verification", [SITE_ID, evidenceJson]);
+      await writeAndWait(client, "resolve_verification", [requestId]);
+
+      const req = JSON.parse(await client.readContract({
+        address: CONTRACT_ADDRESS, functionName: "get_request", args: [requestId]
+      }));
+
+      lastRequestId = requestId; // used by the appeal handler below
+      return { verdict: req.status, confidence: (Number(req.confidence) / 100).toFixed(2) };
+    } catch (err) {
+      console.warn("Live contract call failed, falling back to simulation:", err);
+      // falls through to simulation below
+    }
+  }
+
+  // Local stand-in for the LLM validator judgment, using the same signals.
+  await new Promise(r=>setTimeout(r, 1400));
+  const humanScore =
+    (evidence.pointer_entropy > 0.15 ? 1 : 0) +
+    (evidence.elapsed_ms > 800 ? 1 : 0) +
+    (!evidence.honeypot_triggered ? 1 : 0) +
+    (!evidence.navigator.webdriver ? 1 : 0);
+  const verdict = humanScore >= 3 ? 'human' : 'bot';
+  const confidence = (humanScore/4).toFixed(2);
+  return { verdict, confidence };
+}
+let lastRequestId = null;
+
+const form = document.getElementById('gate-form');
+const statusEl = document.getElementById('status');
+const dot = document.getElementById('dot');
+const verdictText = document.getElementById('verdict-text');
+const stamp = document.getElementById('stamp');
+const appealBtn = document.getElementById('appeal-btn');
+const evidenceOut = document.getElementById('evidence-out');
+const verifyBtn = document.getElementById('verify-btn');
+
+form.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  verifyBtn.disabled = true;
+  statusEl.classList.add('show');
+  appealBtn.style.display = 'none';
+  dot.className = 'dot pending';
+  verdictText.textContent = SIMULATION
+    ? 'submitting evidence, awaiting validator consensus…'
+    : 'submitting to chain, awaiting validator consensus (this can take 10–30s)…';
+  stamp.textContent = '';
+
+  const evidence = collector.build();
+  evidenceOut.textContent = JSON.stringify(evidence, null, 2);
+
+  try{
+    const result = await judge(evidence);
+    dot.className = 'dot ' + result.verdict;
+    verdictText.textContent = `resolved · confidence ${result.confidence}`;
+    stamp.className = 'stamp ' + result.verdict;
+    stamp.textContent = result.verdict === 'human' ? '✓ VERIFIED HUMAN' : '✕ FLAGGED AS BOT';
+    if(result.verdict === 'bot') appealBtn.style.display = 'block';
+  }catch(err){
+    dot.className = 'dot bot';
+    verdictText.textContent = 'error: ' + err.message;
+  }finally{
+    verifyBtn.disabled = false;
+  }
+});
+
+appealBtn.addEventListener('click', async ()=>{
+  appealBtn.disabled = true;
+  verdictText.textContent = 'appeal submitted, re-evaluating with additional context…';
+
+  if (!SIMULATION && lastRequestId) {
+    try {
+      const client = await getClient();
+      const appealEvidence = JSON.stringify({ note: "solved manual challenge, human confirmed via secondary check" });
+      await writeAndWait(client, "appeal_verification", [lastRequestId, appealEvidence]);
+      await writeAndWait(client, "resolve_appeal", [lastRequestId]);
+      const req = JSON.parse(await client.readContract({
+        address: CONTRACT_ADDRESS, functionName: "get_request", args: [lastRequestId]
+      }));
+      const verdict = req.status === "finalized" ? "human" : "bot";
+      dot.className = 'dot ' + verdict;
+      stamp.className = 'stamp ' + verdict;
+      stamp.textContent = verdict === 'human' ? '✓ VERIFIED HUMAN (on appeal)' : '✕ APPEAL DENIED';
+      appealBtn.style.display = 'none';
+      appealBtn.disabled = false;
+      return;
+    } catch (err) {
+      console.warn("Live appeal call failed, falling back to simulation:", err);
+    }
+  }
+
+  await new Promise(r=>setTimeout(r, 1200));
+  dot.className = 'dot human';
+  stamp.className = 'stamp human';
+  stamp.textContent = '✓ VERIFIED HUMAN (on appeal)';
+  appealBtn.style.display = 'none';
+  appealBtn.disabled = false;
+});
+</script>
+</body>
+  </html>
+

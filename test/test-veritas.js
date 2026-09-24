@@ -10,9 +10,9 @@
 import { createClient } from "genlayer-js";
 import fs from "fs";
 
-const RPC_URL = process.env.GL_RPC_URL || "https://studio-next.genlayer.com/api";
+const RPC_URL = process.env.GL_RPC_URL || "https://studio-dev.genlayer.com/api";
 const CHAIN_ID = Number(process.env.GL_CHAIN_ID || 61997);
-const CONTRACT_PATH = "./human_verifier.py";
+const CONTRACT_PATH = "./contracts/human_verifier.py";
 
 async function main() {
   const client = createClient({
@@ -46,7 +46,6 @@ async function main() {
   console.log("2) Registering a test site...");
   await writeAndWait(client, contractAddress, "register_site", [
     "test-site",
-    deployReceipt.from ?? "0x0000000000000000000000000000000000dEaD",
     JSON.stringify({ auto_pass_threshold: 0.9, auto_fail_threshold: 0.1, appeal_window_seconds: 3600 }),
   ]);
 

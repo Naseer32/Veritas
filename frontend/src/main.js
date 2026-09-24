@@ -165,6 +165,7 @@ form.addEventListener('submit', async (e) => {
     } catch {}
     window.__turnstileToken = null;
     try { if (window.turnstile) window.turnstile.reset(); } catch {}
+    collector.honeypotTriggered = (document.getElementById('hp-field')?.value || '') !== '';
     const evidence = collector.build();
     evidence.turnstile = turnstile;
     evidenceOut.textContent = JSON.stringify(evidence, null, 2);

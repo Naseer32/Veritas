@@ -158,10 +158,11 @@ form.addEventListener('submit', async (e) => {
       const tr = await fetch('/api/turnstile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: window.__turnstileToken })
+        body: JSON.stringify({ token: window.__turnstileToken, address: account })
       });
       const td = await tr.json();
       turnstile = { passed: td.success === true, hostname: td.hostname || null };
+      if (td.nonce && td.signature) { window.__attestNonce = td.nonce; window.__attestSig = td.signature; }
     } catch {}
     window.__turnstileToken = null;
     try { if (window.turnstile) window.turnstile.reset(); } catch {}
@@ -170,7 +171,9 @@ form.addEventListener('submit', async (e) => {
     evidence.turnstile = turnstile;
     evidenceOut.textContent = JSON.stringify(evidence, null, 2);
 
-    const { tx, requestId } = await submitVerification(client, SITE_ID, JSON.stringify(evidence), feeWei);
+        if (!window.__attestNonce || !window.__attestSig) throw new Error('Missing attestation - retry Turnstile');
+    const { tx, requestId } = await submitVerification(client, SITE_ID, JSON.stringify(evidence), feeWei, window.__attestNonce, window.__attestSig);
+    window.__attestNonce = null; window.__attestSig = null;
     lastRequestId = requestId;
 
     await resolveVerification(client, requestId);

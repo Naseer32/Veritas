@@ -16,7 +16,7 @@ const studioChain = {
   },
 };
 
-export const CONTRACT_ADDRESS = "0xe4A8e3C8A445A659fc5613a43a2c2cBCF7c46556";
+export const CONTRACT_ADDRESS = "0x70BacF30E95EBCD5E814a678D33749eFDde62453";
 export const SITE_ID = "test-site";
 
 // Make sure the wallet is actively on GenLayer Studio before signing --
@@ -171,11 +171,11 @@ export async function registerSite(client, siteId, configJson) {
 // submit_verification is payable -- feeWei is the site's configured
 // per-verification price (0n for a free site), paid straight from the
 // visitor's connected wallet.
-export async function submitVerification(client, siteId, evidenceJson, feeWei) {
+export async function submitVerification(client, siteId, evidenceJson, feeWei, nonce, signature) {
   const tx = await writeContractWithFees(client, {
     address: CONTRACT_ADDRESS,
     functionName: "submit_verification",
-    args: [siteId, evidenceJson],
+    args: [siteId, evidenceJson, nonce, signature],
     value: feeWei ?? 0n,
   });
 

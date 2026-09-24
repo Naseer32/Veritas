@@ -8,20 +8,30 @@ STATUS_BOT = "bot"
 STATUS_APPEALED = "appealed"
 STATUS_FINALIZED = "finalized"
 
+DEFAULT_PLATFORM_FEE_PERCENT = 10  # Veritas' cut of every paid verification
+
 
 class HumanVerifier(gl.Contract):
     site_count: u256
     request_count: u256
-    sites: str      # JSON: {site_id: {"owner": "0x..", "config": {...}}}
-    requests: str    # JSON: {request_id: {...}}
+    platform_owner: str
+    platform_fee_percent: u256
+    platform_balance_wei: str
+    sites: str       # JSON: {site_id: {"owner":.., "config":.., "balance_wei":..}}
+    requests: str     # JSON: {request_id: {...}}
 
     def __init__(self):
         self.site_count = u256(0)
         self.request_count = u256(0)
+        self.platform_owner = gl.message.sender_address.as_hex
+        self.platform_fee_percent = u256(DEFAULT_PLATFORM_FEE_PERCENT)
+        self.platform_balance_wei = "0"
         self.sites = "{}"
         self.requests = "{}"
 
     # ---------- Site owner: register a site ----------
+    # config_json may include "fee_wei": "<amount>" — the price a visitor
+    # pays per verification on this site. Omit/zero for a free site.
     @gl.public.write
     def register_site(self, site_id: str, config_json: str) -> None:
         sites = json.loads(self.sites)
@@ -31,16 +41,35 @@ class HumanVerifier(gl.Contract):
         sites[site_id] = {
             "owner": gl.message.sender_address.as_hex,
             "config": config_json,
+            "balance_wei": "0",
         }
         self.sites = json.dumps(sites, sort_keys=True)
         self.site_count = u256(int(self.site_count) + 1)
 
-    # ---------- Visitor: submit evidence for verification ----------
-    @gl.public.write
+    # ---------- Visitor: submit evidence for verification (pays own gas +
+    # the site's verification fee, straight from their own wallet) ----------
+    @gl.public.write.payable
     def submit_verification(self, site_id: str, evidence_json: str) -> str:
         sites = json.loads(self.sites)
-        if sites.get(site_id) is None:
+        site = sites.get(site_id)
+        if site is None:
             raise Exception("Site does not exist")
+
+        config = json.loads(site["config"]) if site["config"] else {}
+        required_fee = int(config.get("fee_wei", 0))
+        paid = int(gl.message.value)
+
+        if required_fee > 0:
+            if paid < required_fee:
+                raise Exception(f"Insufficient fee: requires {required_fee} wei")
+
+            platform_cut = (paid * int(self.platform_fee_percent)) // 100
+            site_cut = paid - platform_cut
+
+            site["balance_wei"] = str(int(site["balance_wei"]) + site_cut)
+            self.platform_balance_wei = str(int(self.platform_balance_wei) + platform_cut)
+            sites[site_id] = site
+            self.sites = json.dumps(sites, sort_keys=True)
 
         requests = json.loads(self.requests)
 
@@ -55,6 +84,7 @@ class HumanVerifier(gl.Contract):
             "confidence": "0",
             "reason": "",
             "appeal_evidence": "",
+            "paid_wei": str(paid),
         }
         self.requests = json.dumps(requests, sort_keys=True)
         return request_id
@@ -69,8 +99,6 @@ class HumanVerifier(gl.Contract):
         if req["status"] != STATUS_PENDING:
             raise Exception("Request already resolved")
 
-        # --- Capture into locals before the nondet block (storage reads
-        # inside it are unsafe) ---
         evidence_json = req["evidence"]
 
         def get_decision() -> str:
@@ -178,6 +206,50 @@ class HumanVerifier(gl.Contract):
         req["reason"] = reason
         requests[request_id] = req
         self.requests = json.dumps(requests, sort_keys=True)
+
+    # ---------- Site owner: withdraw their accumulated verification fees ----------
+    @gl.public.write
+    def withdraw_site_balance(self, site_id: str) -> None:
+        sites = json.loads(self.sites)
+        site = sites.get(site_id)
+        if site is None:
+            raise Exception("Site does not exist")
+        if site["owner"] != gl.message.sender_address.as_hex:
+            raise Exception("Only the site owner can withdraw")
+
+        amount = int(site["balance_wei"])
+        if amount == 0:
+            raise Exception("Nothing to withdraw")
+
+        site["balance_wei"] = "0"
+        sites[site_id] = site
+        self.sites = json.dumps(sites, sort_keys=True)
+
+        recipient = gl.get_contract_at(Address(site["owner"]))
+        recipient.emit_transfer(value=u256(amount))
+
+    # ---------- Platform owner: withdraw Veritas' accumulated cut ----------
+    @gl.public.write
+    def withdraw_platform_balance(self) -> None:
+        if gl.message.sender_address.as_hex != self.platform_owner:
+            raise Exception("Only the platform owner can withdraw")
+
+        amount = int(self.platform_balance_wei)
+        if amount == 0:
+            raise Exception("Nothing to withdraw")
+
+        self.platform_balance_wei = "0"
+        recipient = gl.get_contract_at(Address(self.platform_owner))
+        recipient.emit_transfer(value=u256(amount))
+
+    # ---------- Platform owner: adjust the platform's fee cut ----------
+    @gl.public.write
+    def set_platform_fee_percent(self, new_percent: u256) -> None:
+        if gl.message.sender_address.as_hex != self.platform_owner:
+            raise Exception("Only the platform owner can change the fee")
+        if int(new_percent) > 100:
+            raise Exception("Fee percent cannot exceed 100")
+        self.platform_fee_percent = new_percent
 
     # ---------- Views ----------
     @gl.public.view

@@ -134,7 +134,7 @@ form.addEventListener('submit', async (e) => {
       site = await getSite(client, SITE_ID);
     } catch {
       await registerSite(client, SITE_ID, JSON.stringify({ fee_wei: "0" }));
-      site = await getSite(client, SITE_ID);
+      site = { config: JSON.stringify({ fee_wei: "0" }) };
     }
     const config = site.config ? JSON.parse(site.config) : {};
     const feeWei = BigInt(config.fee_wei || 0);

@@ -188,6 +188,7 @@ export async function submitVerification(client, siteId, evidenceJson, feeWei) {
     const count = await client.readContract({
       address: CONTRACT_ADDRESS,
       functionName: "get_request_count",
+    stateStatus: "accepted",
       args: [],
     });
     if (count !== null && count !== undefined) {
@@ -228,6 +229,7 @@ export async function getRequest(client, requestId) {
   const raw = await client.readContract({
     address: CONTRACT_ADDRESS,
     functionName: "get_request",
+    stateStatus: "accepted",
     args: [requestId],
   });
   return JSON.parse(raw);
@@ -237,6 +239,7 @@ export async function getSite(client, siteId) {
   const raw = await client.readContract({
     address: CONTRACT_ADDRESS,
     functionName: "get_site",
+    stateStatus: "accepted",
     args: [siteId],
   });
   return JSON.parse(raw);

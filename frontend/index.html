@@ -21,6 +21,7 @@
       <input type="text" id="name" placeholder="Jane Doe" required>
       <label for="email">Email</label>
       <input type="email" id="email" placeholder="jane@example.com" required>
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAAFCoZ349FDOF8KBC" data-theme="dark" data-callback="onTurnstile" style="margin-bottom:16px;"></div>
       <button type="submit" id="verify-btn" disabled>Verify me</button>
     </form>
 
@@ -44,6 +45,8 @@
     to try it. Contract: 0xe4A8…6556
   </p>
 </div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>window.onTurnstile=function(t){window.__turnstileToken=t;console.log("turnstile ok");};</script>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script type="module" src="./src/main.js"></script>

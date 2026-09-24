@@ -26,6 +26,19 @@ consensus, with an on-chain appeal path for flagged users.
 - [x] Demo frontend (simulation mode)
 - [ ] Submitted to the GenLayer portal
 
+## Test Results (Studio Next)
+
+All flows confirmed working end-to-end via the Studio interact panel:
+
+| Flow | Result |
+|---|---|
+| `register_site` → `submit_verification` (human evidence) | `req_0` |
+| `resolve_verification` (req_0) | human, 74% |
+| `submit_verification` (bot evidence) | `req_1` |
+| `resolve_verification` (req_1) | bot, 99% |
+| `appeal_verification` (req_1) | appealed |
+| `resolve_appeal` (req_1) | human, 95% (overturned) |
+
 ## Setup
 
 ```bash

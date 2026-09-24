@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veritas — Human Verification</title>
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+<div class="kiosk">
+  <div class="seal">VERI<br>TAS</div>
+  <h1>Prove you're human</h1>
+  <p class="sub">on-chain verification, judged by GenLayer validators</p>
+
+  <div class="card">
+    <button id="connect-btn" class="ghost" type="button">Connect Wallet</button>
+    <p id="wallet-status" class="wallet-status">Not connected</p>
+
+    <form id="gate-form">
+      <label for="name">Name</label>
+      <input type="text" id="name" placeholder="Jane Doe" required>
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="jane@example.com" required>
+      <button type="submit" id="verify-btn" disabled>Verify me</button>
+    </form>
+
+    <div class="status" id="status">
+      <div class="verdict">
+        <span class="dot" id="dot"></span>
+        <span id="verdict-text">—</span>
+      </div>
+      <div class="stamp" id="stamp"></div>
+      <a id="tx-link" href="#" target="_blank" style="display:none;"></a>
+      <button class="ghost" id="appeal-btn" style="display:none;">Appeal this decision</button>
+      <details>
+        <summary>Evidence submitted</summary>
+        <pre id="evidence-out"></pre>
+      </details>
+    </div>
+  </div>
+
+  <p class="note">
+    Real on-chain verification — connect a wallet with GEN on Studio Next<br>
+    to try it. Contract: 0xB42e…3E43
+  </p>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -275,3 +275,7 @@ class HumanVerifier(gl.Contract):
         if site is None:
             raise Exception("Site does not exist")
         return json.dumps(site)
+
+    @gl.public.view
+    def get_request_count(self) -> int:
+        return int(self.request_count)

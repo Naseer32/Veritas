@@ -5,6 +5,7 @@ import {
   submitVerification,
   resolveVerification,
   appealVerification,
+  registerSite,
   resolveAppeal,
   getRequest,
   onAccountsChanged,
@@ -129,7 +130,13 @@ form.addEventListener('submit', async (e) => {
   stamp.textContent = '';
 
   try {
-    const site = await getSite(client, SITE_ID);
+    let site;
+    try {
+      site = await getSite(client, SITE_ID);
+    } catch {
+      await registerSite(client, SITE_ID, JSON.stringify({ fee_wei: "0" }));
+      site = await getSite(client, SITE_ID);
+    }
     const config = site.config ? JSON.parse(site.config) : {};
     const feeWei = BigInt(config.fee_wei || 0);
 
@@ -180,3 +187,28 @@ appealBtn.addEventListener('click', async () => {
   }
 });
       
+
+// ---- Temporary: register site (run once only) --------------------
+import { registerSite } from "./genlayer.js";
+window.doRegisterSite = async () => {
+  if (!client) { alert("Connect your wallet first"); return; }
+  try {
+    const tx = await registerSite(client, SITE_ID, JSON.stringify({ fee_wei: "0" }));
+    alert("Registered! tx: " + tx);
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+};
+
+window.doRegisterSite = async () => {
+  if (!client) { alert("Haɗa wallet tukuna"); return; }
+  try {
+    const { registerSite } = await import("./genlayer.js");
+    const tx = await registerSite(client, SITE_ID, JSON.stringify({ fee_wei: "0" }));
+    alert("An yi register! tx: " + tx);
+    console.log("REGISTER TX:", tx);
+  } catch (err) {
+    alert("Kuskure: " + err.message);
+    console.error("REGISTER ERROR:", err);
+  }
+};

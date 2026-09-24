@@ -16,7 +16,7 @@ const studioChain = {
   },
 };
 
-export const CONTRACT_ADDRESS = "0xB42e0D84a87576EbF803BBD455dBB56DB37e3E43";
+export const CONTRACT_ADDRESS = "0xe4A8e3C8A445A659fc5613a43a2c2cBCF7c46556";
 export const SITE_ID = "test-site";
 
 // Make sure the wallet is actively on GenLayer Studio before signing --
@@ -115,6 +115,7 @@ async function writeContractWithFees(client, { address, functionName, args, valu
       args,
       value: safeValue,
     });
+    console.log("FEE ESTIMATE:", JSON.stringify(estimate, (k,v)=>typeof v==='bigint'?v.toString():v));
   } catch (e) {
     throw new Error(`[FEE ESTIMATE FAILED] ${e.message}`);
   }
@@ -185,7 +186,7 @@ export async function submitVerification(client, siteId, evidenceJson, feeWei) {
   try {
     const count = await client.readContract({
       address: CONTRACT_ADDRESS,
-      functionName: "request_count",
+      functionName: "get_request_count",
       args: [],
     });
     if (count !== null && count !== undefined) {

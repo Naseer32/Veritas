@@ -1,52 +1,58 @@
 # Veritas
 
-Bot/human verification as a GenLayer intelligent contract. Instead of a
-deterministic CAPTCHA, borderline verification requests are judged by
-GenLayer validators' LLMs and resolved through Optimistic Democracy
-consensus, with an on-chain appeal path for flagged users.
+On-chain human verification, judged by GenLayer AI validators — no CAPTCHA puzzles, no third-party identity checks. A visitor connects a wallet, the app collects behavioral evidence, and a GenLayer Intelligent Contract's validators independently reach a verdict: **human** or **bot**.
 
-## Structure
+**Live app:** https://veritas-five-zeta.vercel.app
+**Contract (GenLayer Studio):** `0x70BacF30E95EBCD5E814a678D33749eFDde62453`
 
-- `contracts/human_verifier.py` — the intelligent contract (submit →
-  resolve → appeal → finalize).
-- `widget/verifier-widget.js` — client-side evidence collector (honeypot
-  field, pointer entropy, navigator/device signals) that submits to the
-  contract and polls for a result.
-- `test/test-veritas.js` — end-to-end smoke test: deploy, submit a
-  human-looking and a bot-looking evidence bundle, resolve, and appeal.
+## How it works
 
-## Status
+1. **Connect wallet** — the app switches the wallet to GenLayer Studio automatically.
+2. **Evidence collection** — pointer movement entropy, touch/tap/scroll counts, form input activity, a hidden honeypot field, and browser fingerprint signals (timezone, language, `navigator.webdriver`) are gathered client-side.
+3. **Turnstile check** — Cloudflare Turnstile runs in the browser. The result is verified server-side (`/api/turnstile`), which also signs a one-time attestation (`nonce` + ECDSA/secp256k1 signature) proving the check was genuinely validated by the server, not forged in the browser.
+4. **Submit on-chain** — evidence, nonce, and signature are sent to `submit_verification`. The contract verifies the signature itself (pure-Python ECDSA running inside GenVM) before accepting the submission, and rejects reused nonces.
+5. **AI judgment** — `resolve_verification` runs an LLM prompt across independent GenLayer validators. They must reach consensus (matching verdict, confidence within 15) before the result is finalized on-chain.
+6. **Appeal** — a `bot` verdict can be appealed by solving a fresh challenge; validators re-judge using the original evidence plus the appeal.
 
-- [x] Contract deployed and smoke-tested on GenLayer Studio
-      (`0x78cD3fcB07DBbb14549f1e7Cb5D0eA00b577c0a9`) — register_site,
-      submit_verification, resolve_verification (human + bot cases),
-      appeal_verification, and resolve_appeal all confirmed working
-      end-to-end via the Studio interact panel.
-- [ ] Redeploy to GenLayer Studio Next for the hackathon submission
-- [ ] Widget integrated with a demo site
-- [x] Demo frontend (simulation mode)
-- [ ] Submitted to the GenLayer portal
+## Why the server attestation matters
 
-## Test Results (GenLayer Studio)
+Client-side checks (Turnstile widget, behavioral signals) can be spoofed by anyone willing to fake the browser's output. The server attestation closes that gap: only a signature from the server's private key (verified against a public key baked into the contract) is accepted, and each signature can be used exactly once. A forged submission is rejected by the contract itself, not just by the frontend.
 
-All flows confirmed working end-to-end via the Studio interact panel:
+## Repo layout
 
-| Flow | Result |
+contracts/human_verifier.py   # Intelligent Contract (GenLayer, Python)
+frontend/
+├── index.html
+├── package.json
+└── src/
+├── genlayer.js            # wallet + contract read/write helpers
+├── main.js                # evidence collection, UI wiring
+└── style.css
+frontend/api/turnstile.js      # Vercel serverless function: Turnstile verify + signing
+
+## Contract methods
+
+| Method | Purpose |
 |---|---|
-| `register_site` → `submit_verification` (human evidence) | `req_0` |
-| `resolve_verification` (req_0) | human, 74% |
-| `submit_verification` (bot evidence) | `req_1` |
-| `resolve_verification` (req_1) | bot, 99% |
-| `appeal_verification` (req_1) | appealed |
-| `resolve_appeal` (req_1) | human, 95% (overturned) |
+| `register_site(site_id, config_json)` | Site owner registers, optionally sets a per-verification fee (`fee_wei`) |
+| `submit_verification(site_id, evidence_json, nonce, signature)` | Visitor submits evidence; requires a valid, unused server attestation |
+| `resolve_verification(request_id)` | Permissionless — triggers AI judgment via validator consensus |
+| `appeal_verification(request_id, appeal_evidence_json)` | Flagged visitor appeals a `bot` verdict |
+| `resolve_appeal(request_id)` | Re-judges using original + appeal evidence |
+| `withdraw_site_balance(site_id)` / `withdraw_platform_balance()` | Withdraw accumulated verification fees |
+| `get_request(request_id)` / `get_status(request_id)` / `get_site(site_id)` | Views |
 
-## Setup
+## Local development
 
-```bash
-npm install genlayer-js
-node test/test-veritas.js
-```
+Built and deployed entirely from a mobile device (Termux + GitHub + Vercel) — no desktop environment. Contract changes are tested manually in [GenLayer Studio](https://studio.genlayer.com) before deployment; there is no automated test suite yet.
 
-Set `GL_RPC_URL` and `GL_CHAIN_ID` env vars to point at the network you're
-testing against (defaults to Studio Dev —
-current RPC endpoint).
+### Environment variables (Vercel)
+
+- `TURNSTILE_SECRET_KEY` — Cloudflare Turnstile secret key
+- `ATTESTATION_KEY_D` — private key (hex) for signing attestations; must match the public key (`X`, `Y`) hardcoded in both `frontend/api/turnstile.js` and `contracts/human_verifier.py`
+
+## Known limitations
+
+- Studio is a hosted testnet — evidence and fees are not production-grade guarantees.
+- The frontend fee-estimation call (`sim_getFeeConfig`) isn't supported by Studio's RPC on the pinned `genlayer-js` version; the app falls back to writing without a fee estimate.
+- Confidence scores reflect LLM judgment on the submitted evidence, not a cryptographic proof of humanness.

@@ -2,6 +2,7 @@ import {
   connectWallet,
   getClient,
   getSite,
+  registerSite,
   submitVerification,
   resolveVerification,
   appealVerification,
@@ -153,28 +154,28 @@ form.addEventListener('submit', async (e) => {
     const feeWei = BigInt(config.fee_wei || 0);
 
     if (!window.__turnstileToken) throw new Error('Complete the Turnstile check first');
-    let turnstile = { passed: false };
-    try {
-      const tr = await fetch('/api/turnstile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: window.__turnstileToken, address: account })
-      });
-      const td = await tr.json();
-      turnstile = { passed: td.success === true, hostname: td.hostname || null };
-      window.__lastTd = td;
-      if (td.nonce && td.signature) { window.__attestNonce = td.nonce; window.__attestSig = td.signature; }
-    } catch {}
-    window.__turnstileToken = null;
-    try { if (window.turnstile) window.turnstile.reset(); } catch {}
+
+    // Build evidence FIRST and never mutate it again — the server signs a
+    // hash of this exact string, and the contract re-hashes this exact
+    // string, so it must be byte-identical everywhere.
     collector.honeypotTriggered = (document.getElementById('hp-field')?.value || '') !== '';
     const evidence = collector.build();
-    evidence.turnstile = turnstile;
+    const evidenceJson = JSON.stringify(evidence);
     evidenceOut.textContent = JSON.stringify(evidence, null, 2);
 
-        if (!window.__attestNonce || !window.__attestSig) throw new Error('Missing attestation ' + JSON.stringify(window.__lastTd || null));
-    const { tx, requestId } = await submitVerification(client, SITE_ID, JSON.stringify(evidence), feeWei, window.__attestNonce, window.__attestSig);
-    window.__attestNonce = null; window.__attestSig = null;
+    const tr = await fetch('/api/turnstile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: window.__turnstileToken, address: account, site_id: SITE_ID, evidence_json: evidenceJson })
+    });
+    const td = await tr.json();
+    window.__turnstileToken = null;
+    try { if (window.turnstile) window.turnstile.reset(); } catch {}
+    if (!td.success || !td.nonce || !td.expiry || !td.signature) {
+      throw new Error('Attestation failed: ' + JSON.stringify(td));
+    }
+
+    const { tx, requestId } = await submitVerification(client, SITE_ID, evidenceJson, feeWei, td.nonce, td.expiry, td.signature);
     lastRequestId = requestId;
 
     await resolveVerification(client, requestId);
@@ -197,25 +198,45 @@ form.addEventListener('submit', async (e) => {
 });
 
 appealBtn.addEventListener('click', async () => {
-  if (!client || !lastRequestId) return;
+  if (!client || !lastRequestId || !account) return;
   const word = Math.random().toString(36).slice(2, 7);
   const t0 = performance.now();
   const typed = window.prompt('Type this word to confirm you are human: ' + word);
-  if (typed === null || typed.trim().toLowerCase() !== word) {
-    verdictText.textContent = 'challenge failed, appeal cancelled';
+  if (typed === null) {
+    verdictText.textContent = 'appeal cancelled';
     return;
   }
   appealBtn.disabled = true;
   verdictText.textContent = 'appeal submitted, re-evaluating with additional context…';
 
   try {
-    const appealEvidence = JSON.stringify({
+    // The appeal evidence is built first and never mutated afterward, same
+    // rule as the submit flow — the server signs a hash of this exact
+    // string, so the challenge check happens server-side, not in this file.
+    const appealEvidence = {
       challenge_word: word,
-      challenge_passed: true,
       solve_ms: Math.round(performance.now() - t0),
       fresh_signals: collector.build()
+    };
+    const appealEvidenceJson = JSON.stringify(appealEvidence);
+
+    const ar = await fetch('/api/appeal-attest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        address: account,
+        request_id: lastRequestId,
+        appeal_evidence_json: appealEvidenceJson,
+        challenge_word: word,
+        challenge_answer: typed,
+      })
     });
-    await appealVerification(client, lastRequestId, appealEvidence);
+    const ad = await ar.json();
+    if (!ad.success || !ad.nonce || !ad.expiry || !ad.signature) {
+      throw new Error('Appeal challenge failed: ' + JSON.stringify(ad));
+    }
+
+    await appealVerification(client, lastRequestId, appealEvidenceJson, ad.nonce, ad.expiry, ad.signature);
     await resolveAppeal(client, lastRequestId);
     const req = await getRequest(client, lastRequestId);
     const verdict = req.status === 'finalized' ? 'human' : 'bot';
@@ -229,29 +250,3 @@ appealBtn.addEventListener('click', async () => {
     appealBtn.disabled = false;
   }
 });
-      
-
-// ---- Temporary: register site (run once only) --------------------
-import { registerSite } from "./genlayer.js";
-window.doRegisterSite = async () => {
-  if (!client) { alert("Connect your wallet first"); return; }
-  try {
-    const tx = await registerSite(client, SITE_ID, JSON.stringify({ fee_wei: "0" }));
-    alert("Registered! tx: " + tx);
-  } catch (err) {
-    alert("Error: " + err.message);
-  }
-};
-
-window.doRegisterSite = async () => {
-  if (!client) { alert("Haɗa wallet tukuna"); return; }
-  try {
-    const { registerSite } = await import("./genlayer.js");
-    const tx = await registerSite(client, SITE_ID, JSON.stringify({ fee_wei: "0" }));
-    alert("An yi register! tx: " + tx);
-    console.log("REGISTER TX:", tx);
-  } catch (err) {
-    alert("Kuskure: " + err.message);
-    console.error("REGISTER ERROR:", err);
-  }
-};

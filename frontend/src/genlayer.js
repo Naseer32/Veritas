@@ -2,11 +2,6 @@ import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 
-// Deployed on GenLayer Studio (studio.genlayer.com), chain id 61999.
-// Built from the SDK's `studionet` object with the id/name/RPC overridden,
-// so anything else studionet exposes (nativeCurrency, etc.) still comes
-// through unchanged. (Same pattern as the Arbiter frontend, adjusted from
-// Studio's own 61999.)
 const studioChain = {
   ...studionet,
   id: 61999,
@@ -16,20 +11,18 @@ const studioChain = {
   },
 };
 
-export const CONTRACT_ADDRESS = "0x70BacF30E95EBCD5E814a678D33749eFDde62453";
+// NOTE: replace with the new contract address after deploying the
+// attestation-bound version in GenLayer Studio.
+export const CONTRACT_ADDRESS = "0x36266158691b03689ef31Db032c26B8f092378F3";
 export const SITE_ID = "test-site";
 
-// Make sure the wallet is actively on GenLayer Studio before signing --
-// genlayer-js's client requires the wallet's current chain to match, or
-// write calls fail with "chainId should be same as current chainId".
 function toHexChainId(id) {
   return "0x" + id.toString(16);
 }
 
 export async function ensureStudioNetwork() {
   if (!window.ethereum) throw new Error("No injected wallet found (e.g. MetaMask).");
-  const rpcUrl =
-    studioChain.rpcUrls?.default?.http?.[0] ?? studioChain.rpcUrls?.[0];
+  const rpcUrl = studioChain.rpcUrls?.default?.http?.[0] ?? studioChain.rpcUrls?.[0];
   const explorerUrl = studioChain.blockExplorers?.default?.url;
   const hexId = toHexChainId(studioChain.id);
 
@@ -39,20 +32,13 @@ export async function ensureStudioNetwork() {
       {
         chainId: hexId,
         chainName: studioChain.name ?? "GenLayer Studio",
-        nativeCurrency: studioChain.nativeCurrency ?? {
-          name: "GEN",
-          symbol: "GEN",
-          decimals: 18,
-        },
+        nativeCurrency: studioChain.nativeCurrency ?? { name: "GEN", symbol: "GEN", decimals: 18 },
         rpcUrls: [rpcUrl],
         blockExplorerUrls: explorerUrl ? [explorerUrl] : [],
       },
     ],
   });
 
-  // wallet_addEthereumChain doesn't always switch the active network on its
-  // own (e.g. if the chain was already added previously) -- force it, then
-  // verify, so we never silently proceed on the wrong chain.
   await window.ethereum.request({
     method: "wallet_switchEthereumChain",
     params: [{ chainId: hexId }],
@@ -94,30 +80,15 @@ export function onAccountsChanged(callback) {
 }
 
 export function getClient(account) {
-  return createClient({
-    chain: studioChain,
-    account,
-  });
+  return createClient({ chain: studioChain, account });
 }
 
-// genlayer-js's fee-distribution system for write calls -- without it,
-// writes fail with FeesDistributionMissing / FeeValueMustBeNonZero. This
-// estimates the required fee distribution/value via the SDK's own
-// estimateTransactionFeesForWrite() and feeds that straight into the real
-// write call, instead of computing or hardcoding fee numbers ourselves.
 async function writeContractWithFees(client, { address, functionName, args, value }) {
   const safeValue = value ?? 0n;
   let estimate;
   try {
-    estimate = await client.estimateTransactionFeesForWrite({
-      address,
-      functionName,
-      args,
-      value: safeValue,
-    });
-    console.log("FEE ESTIMATE:", JSON.stringify(estimate, (k,v)=>typeof v==='bigint'?v.toString():v));
+    estimate = await client.estimateTransactionFeesForWrite({ address, functionName, args, value: safeValue });
   } catch (e) {
-    console.warn("fee estimate unavailable, writing without fees:", e.message);
     estimate = null;
   }
 
@@ -128,19 +99,12 @@ async function writeContractWithFees(client, { address, functionName, args, valu
       functionName,
       args,
       value: safeValue,
-      ...(estimate ? { fees: {
-        distribution: estimate.distribution,
-        feeValue: estimate.feeValue,
-        messageAllocations: estimate.messageAllocations,
-      } } : {}),
+      ...(estimate ? { fees: { distribution: estimate.distribution, feeValue: estimate.feeValue, messageAllocations: estimate.messageAllocations } } : {}),
     });
   } catch (e) {
     throw new Error(`[WRITE FAILED] ${e.message}`);
   }
 
-  // ACCEPTED only means validators agreed on *an* outcome -- it does not
-  // mean the contract call itself succeeded. Check txExecutionResultName
-  // in the receipt before treating this write as successful.
   let receipt;
   try {
     receipt = await client.waitForTransactionReceipt({
@@ -161,41 +125,29 @@ async function writeContractWithFees(client, { address, functionName, args, valu
 }
 
 export async function registerSite(client, siteId, configJson) {
-  return writeContractWithFees(client, {
-    address: CONTRACT_ADDRESS,
-    functionName: "register_site",
-    args: [siteId, configJson],
-  });
+  return writeContractWithFees(client, { address: CONTRACT_ADDRESS, functionName: "register_site", args: [siteId, configJson] });
 }
 
-// submit_verification is payable -- feeWei is the site's configured
-// per-verification price (0n for a free site), paid straight from the
-// visitor's connected wallet.
-export async function submitVerification(client, siteId, evidenceJson, feeWei, nonce, signature) {
+// evidenceJson must be byte-identical to what was hashed server-side when
+// signing the attestation, or the contract's digest check will fail.
+export async function submitVerification(client, siteId, evidenceJson, feeWei, nonce, expiry, signature) {
   const tx = await writeContractWithFees(client, {
     address: CONTRACT_ADDRESS,
     functionName: "submit_verification",
-    args: [siteId, evidenceJson, nonce, signature],
+    args: [siteId, evidenceJson, nonce, expiry, signature],
     value: feeWei ?? 0n,
   });
 
-  // submit_verification's return value (the request_id string) is encoded
-  // in GenLayer's custom calldata format, not something we decode client-
-  // side here -- so after the write confirms, read request_count and
-  // reconstruct the id the same way Arbiter recovers job ids from
-  // job_count(). Caveat: if another submission lands in the brief window
-  // between confirmation and this read, the id could be off by one.
+  // Race-free: look up this submitter's own request by the nonce they used,
+  // instead of reading the shared request_count.
   let requestId = null;
   try {
-    const count = await client.readContract({
+    requestId = await client.readContract({
       address: CONTRACT_ADDRESS,
-      functionName: "get_request_count",
-    stateStatus: "accepted",
-      args: [],
+      functionName: "get_request_id_by_nonce",
+      stateStatus: "accepted",
+      args: [nonce],
     });
-    if (count !== null && count !== undefined) {
-      requestId = `req_${(Number(count) - 1)}`;
-    }
   } catch {
     // Write succeeded either way; just can't show the id immediately.
   }
@@ -204,50 +156,31 @@ export async function submitVerification(client, siteId, evidenceJson, feeWei, n
 }
 
 export async function resolveVerification(client, requestId) {
-  return writeContractWithFees(client, {
-    address: CONTRACT_ADDRESS,
-    functionName: "resolve_verification",
-    args: [requestId],
-  });
+  return writeContractWithFees(client, { address: CONTRACT_ADDRESS, functionName: "resolve_verification", args: [requestId] });
 }
 
-export async function appealVerification(client, requestId, appealEvidenceJson) {
+export async function appealVerification(client, requestId, appealEvidenceJson, nonce, expiry, signature) {
   return writeContractWithFees(client, {
     address: CONTRACT_ADDRESS,
     functionName: "appeal_verification",
-    args: [requestId, appealEvidenceJson],
+    args: [requestId, appealEvidenceJson, nonce, expiry, signature],
   });
 }
 
 export async function resolveAppeal(client, requestId) {
-  return writeContractWithFees(client, {
-    address: CONTRACT_ADDRESS,
-    functionName: "resolve_appeal",
-    args: [requestId],
-  });
+  return writeContractWithFees(client, { address: CONTRACT_ADDRESS, functionName: "resolve_appeal", args: [requestId] });
 }
 
 export async function getRequest(client, requestId) {
-  const raw = await client.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_request",
-    stateStatus: "accepted",
-    args: [requestId],
-  });
+  const raw = await client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_request", stateStatus: "accepted", args: [requestId] });
   return JSON.parse(raw);
 }
 
 export async function getSite(client, siteId) {
-  const raw = await client.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: "get_site",
-    stateStatus: "accepted",
-    args: [siteId],
-  });
+  const raw = await client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_site", stateStatus: "accepted", args: [siteId] });
   return JSON.parse(raw);
 }
 
-// Block explorer link for a tx hash.
 export const EXPLORER_BASE_URL = "https://explorer-studio.genlayer.com";
 
 export function txExplorerUrl(txHash) {

@@ -2,6 +2,7 @@
 from genlayer import *
 import json
 import hashlib
+import datetime
 
 _P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
 _N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -50,6 +51,10 @@ def _verify_attestation(msg, sig_hex):
         return False
 
 
+def _digest(evidence_json: str) -> str:
+    return hashlib.sha256(evidence_json.encode()).hexdigest()
+
+
 STATUS_PENDING = "pending"
 STATUS_HUMAN = "human"
 STATUS_BOT = "bot"
@@ -65,9 +70,10 @@ class HumanVerifier(gl.Contract):
     platform_owner: str
     platform_fee_percent: u256
     platform_balance_wei: str
-    sites: str       # JSON: {site_id: {"owner":.., "config":.., "balance_wei":..}}
-    requests: str     # JSON: {request_id: {...}}
-    used_nonces: str
+    sites: str            # JSON: {site_id: {"owner":.., "config":.., "balance_wei":..}}
+    requests: str          # JSON: {request_id: {...}}
+    used_nonces: str       # JSON: {nonce: 1}
+    nonce_to_request: str  # JSON: {nonce: request_id}
 
     def __init__(self):
         self.site_count = u256(0)
@@ -78,10 +84,25 @@ class HumanVerifier(gl.Contract):
         self.sites = "{}"
         self.requests = "{}"
         self.used_nonces = "{}"
+        self.nonce_to_request = "{}"
+
+    def _check_attestation(self, msg: bytes, nonce: str, expiry: str, signature: str) -> None:
+        used = json.loads(self.used_nonces)
+        if nonce in used:
+            raise Exception("Attestation already used")
+        try:
+            expiry_ts = int(expiry)
+        except Exception:
+            raise Exception("Invalid expiry")
+        now_ts = int(datetime.datetime.now().timestamp())
+        if now_ts > expiry_ts:
+            raise Exception("Attestation expired")
+        if not _verify_attestation(msg, signature):
+            raise Exception("Invalid attestation")
+        used[nonce] = 1
+        self.used_nonces = json.dumps(used, sort_keys=True)
 
     # ---------- Site owner: register a site ----------
-    # config_json may include "fee_wei": "<amount>" — the price a visitor
-    # pays per verification on this site. Omit/zero for a free site.
     @gl.public.write
     def register_site(self, site_id: str, config_json: str) -> None:
         sites = json.loads(self.sites)
@@ -96,23 +117,28 @@ class HumanVerifier(gl.Contract):
         self.sites = json.dumps(sites, sort_keys=True)
         self.site_count = u256(int(self.site_count) + 1)
 
-    # ---------- Visitor: submit evidence for verification (pays own gas +
-    # the site's verification fee, straight from their own wallet) ----------
+    # ---------- Visitor: submit evidence for verification ----------
+    # The attestation message binds: sender address, site_id, sha256(evidence_json),
+    # expiry, and nonce. The server (which checked Turnstile) is the only party that
+    # can produce a valid signature over this exact evidence blob.
     @gl.public.write.payable
-    def submit_verification(self, site_id: str, evidence_json: str, nonce: str, signature: str) -> str:
+    def submit_verification(
+        self,
+        site_id: str,
+        evidence_json: str,
+        nonce: str,
+        expiry: str,
+        signature: str,
+    ) -> str:
         sites = json.loads(self.sites)
         site = sites.get(site_id)
         if site is None:
             raise Exception("Site does not exist")
 
-        used = json.loads(self.used_nonces)
-        if nonce in used:
-            raise Exception("Attestation already used")
-        att_msg = ("veritas-v1|" + gl.message.sender_address.as_hex.lower() + "|" + nonce).encode()
-        if not _verify_attestation(att_msg, signature):
-            raise Exception("Invalid attestation")
-        used[nonce] = 1
-        self.used_nonces = json.dumps(used, sort_keys=True)
+        sender = gl.message.sender_address.as_hex.lower()
+        digest = _digest(evidence_json)
+        msg = f"veritas-v1|submit|{sender}|{site_id}|{digest}|{expiry}|{nonce}".encode()
+        self._check_attestation(msg, nonce, expiry, signature)
 
         config = json.loads(site["config"]) if site["config"] else {}
         required_fee = int(config.get("fee_wei", 0))
@@ -137,8 +163,9 @@ class HumanVerifier(gl.Contract):
 
         requests[request_id] = {
             "site_id": site_id,
-            "submitter": gl.message.sender_address.as_hex,
+            "submitter": sender,
             "evidence": evidence_json,
+            "evidence_digest": digest,
             "status": STATUS_PENDING,
             "confidence": "0",
             "reason": "",
@@ -146,6 +173,11 @@ class HumanVerifier(gl.Contract):
             "paid_wei": str(paid),
         }
         self.requests = json.dumps(requests, sort_keys=True)
+
+        n2r = json.loads(self.nonce_to_request)
+        n2r[nonce] = request_id
+        self.nonce_to_request = json.dumps(n2r, sort_keys=True)
+
         return request_id
 
     # ---------- Anyone: trigger judgment (permissionless, AI decides) ----------
@@ -198,20 +230,34 @@ class HumanVerifier(gl.Contract):
         requests[request_id] = req
         self.requests = json.dumps(requests, sort_keys=True)
 
-    # ---------- Flagged visitor: appeal a bot verdict ----------
+    # ---------- Flagged visitor: appeal a bot verdict (server-authenticated) ----------
     @gl.public.write
-    def appeal_verification(self, request_id: str, appeal_evidence_json: str) -> None:
+    def appeal_verification(
+        self,
+        request_id: str,
+        appeal_evidence_json: str,
+        nonce: str,
+        expiry: str,
+        signature: str,
+    ) -> None:
         requests = json.loads(self.requests)
         req = requests.get(request_id)
         if req is None:
             raise Exception("Request does not exist")
         if req["status"] != STATUS_BOT:
             raise Exception("Only a bot verdict can be appealed")
-        if req["submitter"] != gl.message.sender_address.as_hex:
+
+        sender = gl.message.sender_address.as_hex.lower()
+        if req["submitter"] != sender:
             raise Exception("Only the original submitter can appeal")
+
+        digest = _digest(appeal_evidence_json)
+        msg = f"veritas-v1|appeal|{sender}|{request_id}|{digest}|{expiry}|{nonce}".encode()
+        self._check_attestation(msg, nonce, expiry, signature)
 
         req["status"] = STATUS_APPEALED
         req["appeal_evidence"] = appeal_evidence_json
+        req["appeal_evidence_digest"] = digest
         requests[request_id] = req
         self.requests = json.dumps(requests, sort_keys=True)
 
@@ -338,3 +384,11 @@ class HumanVerifier(gl.Contract):
     @gl.public.view
     def get_request_count(self) -> int:
         return int(self.request_count)
+
+    @gl.public.view
+    def get_request_id_by_nonce(self, nonce: str) -> str:
+        n2r = json.loads(self.nonce_to_request)
+        rid = n2r.get(nonce)
+        if rid is None:
+            raise Exception("No request for this nonce")
+        return rid

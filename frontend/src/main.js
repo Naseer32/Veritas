@@ -158,7 +158,7 @@ form.addEventListener('submit', async (e) => {
     // Build evidence FIRST and never mutate it again — the server signs a
     // hash of this exact string, and the contract re-hashes this exact
     // string, so it must be byte-identical everywhere.
-    collector.honeypotTriggered = true; // TEMP: forcing bot verdict for appeal test
+    collector.honeypotTriggered = (document.getElementById('hp-field')?.value || '') !== '';
     const evidence = collector.build();
     const evidenceJson = JSON.stringify(evidence);
     evidenceOut.textContent = JSON.stringify(evidence, null, 2);

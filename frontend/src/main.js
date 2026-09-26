@@ -243,10 +243,10 @@ appealBtn.addEventListener('click', async () => {
     dot.className = 'dot ' + verdict;
     stamp.className = 'stamp ' + verdict;
     stamp.textContent = verdict === 'human' ? '✓ VERIFIED HUMAN (on appeal)' : '✕ APPEAL DENIED';
-  } catch (err) {
-    verdictText.textContent = 'error: ' + err.message;
-  } finally {
     appealBtn.style.display = 'none';
+  } catch (err) {
+    verdictText.textContent = 'error: ' + err.message + ' — tap Appeal to try again';
+  } finally {
     appealBtn.disabled = false;
   }
 });
